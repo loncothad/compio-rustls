@@ -18,9 +18,10 @@ rustls           = "0.23"
 rustls-pki-types = "1"
 
 [dependencies]
-compio-io  = "0.9"
-compio-buf = { features = [ "bytes" ], version = "0.8" }
-rustls     = "0.23"
+compio-io      = "0.9"
+compio-buf     = { features = [ "bytes" ], version = "0.8" }
+rustls         = "0.23"
+xiaoyong-value = "2"
 
 [workspace.lints.rust]
 non_ascii_idents = "forbid"

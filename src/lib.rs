@@ -3,6 +3,9 @@
 mod acceptor;
 mod connector;
 mod stream;
+mod util;
+
+pub(crate) const DEFAULT_BUF_CAPACITY: usize = 4096;
 
 pub use ::rustls;
 pub use stream::*;
