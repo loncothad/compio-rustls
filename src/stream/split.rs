@@ -8,10 +8,7 @@ use std::{
 };
 
 use compio_buf::{
-    BufResult,
-    IoBuf,
-    IoBufMut,
-    bytes::BytesMut,
+    BufResult, IntoInner as _, IoBuf, IoBufMut, bytes::BytesMut
 };
 use compio_io::{
     AsyncRead,
@@ -90,14 +87,18 @@ where
                 rbuf.reserve(4096);
             }
 
-            let BufResult(res, b) = self.os_reader.read(rbuf).await;
+            let init_len = rbuf.buf_len();
+            let BufResult(res, slice) = self.os_reader.read(rbuf.slice(init_len..)).await;
+            let mut b = slice.into_inner();
 
             match res {
                 | Ok(0) => {
                     self.read_buf = Some(b);
                     return BufResult(Err(io::Error::from(io::ErrorKind::UnexpectedEof)), buf);
                 },
-                | Ok(_) => {},
+                | Ok(n) => {
+                    unsafe { b.set_len(init_len + n) };
+                },
                 | Err(e) => {
                     self.read_buf = Some(b);
                     return BufResult(Err(e), buf);

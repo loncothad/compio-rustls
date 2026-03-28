@@ -1,8 +1,5 @@
 use compio_buf::{
-    BufResult,
-    IoBuf,
-    IoBufMut,
-    bytes::BytesMut,
+    BufResult, IntoInner as _, IoBuf, IoBufMut, bytes::BytesMut
 };
 use compio_io::{
     AsyncRead,
@@ -121,13 +118,19 @@ where
             rbuf.reserve(4096);
         }
 
-        let BufResult(res, b) = self.io.read(rbuf).await;
+        let init_len = rbuf.buf_len();
+        let BufResult(res, slice) = self.io.read(rbuf.slice(init_len..)).await;
+        let mut b = slice.into_inner();
+
         let n = match res {
             | Ok(0) => {
                 self.read_buf = Some(b);
                 return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
             },
-            | Ok(n) => n,
+            | Ok(n) => {
+                unsafe { b.set_len(init_len + n) };
+                n
+            },
             | Err(e) => {
                 self.read_buf = Some(b);
                 return Err(e);
