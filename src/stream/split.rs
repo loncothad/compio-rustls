@@ -8,7 +8,11 @@ use std::{
 };
 
 use compio_buf::{
-    BufResult, IntoInner as _, IoBuf, IoBufMut, bytes::BytesMut
+    BufResult,
+    IntoInner as _,
+    IoBuf,
+    IoBufMut,
+    bytes::BytesMut,
 };
 use compio_io::{
     AsyncRead,
@@ -88,7 +92,7 @@ where
             }
 
             let init_len = rbuf.buf_len();
-            let BufResult(res, slice) = self.os_reader.read(rbuf.slice(init_len..)).await;
+            let BufResult(res, slice) = self.os_reader.read(rbuf.slice(init_len ..)).await;
             let mut b = slice.into_inner();
 
             match res {
