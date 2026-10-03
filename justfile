@@ -5,4 +5,4 @@ fmt:
     rumdl check --fix .
 
 check:
-    cargo +nightly check
+    cargo check

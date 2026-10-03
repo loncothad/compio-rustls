@@ -1,14 +1,15 @@
 [package]
-name        = "compio-rustls"
-description = "impl Async for rustls"
-version     = "0.3.0"
-edition     = "2024"
-publish     = true
-authors     = [ "loncothad <me@loncothad.cc>" ]
-repository  = "https://github.com/loncothad/compio-rustls"
-license     = "MIT OR Apache-2.0"
-categories  = [ "asynchronous", "cryptography", "network-programming" ]
-keywords    = [ "compio", "rustls" ]
+name         = "compio-rustls"
+description  = "impl Async for rustls"
+version      = "0.3.0"
+edition      = "2024"
+rust-version = "1.100"
+publish      = true
+authors      = [ "loncothad <me@loncothad.cc>" ]
+repository   = "https://github.com/loncothad/compio-rustls"
+license      = "MIT OR Apache-2.0"
+categories   = [ "asynchronous", "cryptography", "network-programming" ]
+keywords     = [ "compio", "rustls" ]
 
 [dev-dependencies]
 compio           = { features = [ "macros", "net" ], version = "0.19" }
