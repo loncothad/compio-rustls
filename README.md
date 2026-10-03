@@ -13,18 +13,18 @@ The minimum supported Rust version (MSRV) is **1.100**, with the 2024 edition.
 Rust 1.100 stabilizes the core Allocator API. This crate has no direct raw
 allocation calls to migrate and does not add custom-allocator public APIs.
 
-Rust 1.100 is currently in beta, so `rust-toolchain.toml` selects the `beta`
-channel with Clippy, rustfmt, and Rust sources. After Rust 1.100 is released,
-change the toolchain channel to `1.100.0`; the MSRV remains `1.100`.
+This baseline targets the stable Rust 1.100 release and was validated locally
+with Rust 1.100 beta while the release was still pending. No beta toolchain
+is enforced by this repository.
 
 Use `cargo check`, `cargo clippy --workspace --all-targets --all-features`,
-and `cargo test --workspace --all-features` with the selected toolchain.
-`just check` also uses that toolchain. TLS integration tests need a supported
+and `cargo test --workspace --all-features` with Rust 1.100 or newer.
+`just check` also uses ordinary Cargo. TLS integration tests need a supported
 compio I/O backend.
 
-`just fmt` still uses `cargo +nightly fmt` because `.rustfmt.toml` enables
-nightly-only formatting options. Install nightly separately for formatting;
-builds, checks, and tests do not require it.
+`.rustfmt.toml` enables nightly-only formatting options. For formatting,
+select nightly explicitly, for example with `RUSTUP_TOOLCHAIN=nightly just fmt`.
+Builds, checks, and tests do not require nightly.
 
 ## License
 

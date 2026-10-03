@@ -1,6 +1,6 @@
 fmt:
     taplo fmt
-    cargo +nightly fmt
+    cargo fmt
     rumdl fmt .
     rumdl check --fix .
 
