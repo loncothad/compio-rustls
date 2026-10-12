@@ -8,6 +8,7 @@ use compio_buf::{
 use compio_io::{
     AsyncRead,
     AsyncWrite,
+    util::Splittable,
 };
 use rustls::{
     ConnectionCommon,
@@ -16,10 +17,17 @@ use rustls::{
 
 use crate::{
     DEFAULT_BUF_CAPACITY,
-    stream::util::{
-        flush_tls_writes,
-        process_tls_reads,
-        read_plaintext,
+    stream::{
+        split::{
+            TlsReadHalf,
+            TlsWriteHalf,
+            split_tls_stream_with_buffers,
+        },
+        util::{
+            flush_tls_writes,
+            process_tls_reads,
+            read_plaintext,
+        },
     },
 };
 
@@ -29,6 +37,12 @@ pub struct TlsStream<S, C> {
     read_buf:   Option<BytesMut>,
     write_buf:  Option<BytesMut>,
 }
+
+/// Read and write halves produced by splitting a [`TlsStream`].
+pub type TlsStreamHalves<S, C> = (
+    TlsReadHalf<<S as Splittable>::ReadHalf, <S as Splittable>::WriteHalf, C>,
+    TlsWriteHalf<<S as Splittable>::WriteHalf, C>,
+);
 
 #[cfg(unix)]
 use std::os::unix::io::{
@@ -108,6 +122,8 @@ where
         (&mut self.io, &mut self.connection)
     }
 
+    /// Extracts the transport and Rustls connection, discarding local TLS buffers.
+    /// Use [`Self::into_split`] to split a stream without losing buffered data.
     pub fn into_inner(self) -> (S, C) {
         (self.io, self.connection)
     }
@@ -118,6 +134,12 @@ where
 
     async fn fetch_tls_reads(&mut self) -> io::Result<usize> {
         let mut rbuf = self.read_buf.take().unwrap_or_else(|| BytesMut::with_capacity(4096));
+        // Rustls may consume only a prefix of a transport read. Feed the
+        // retained ciphertext before waiting for the peer to send more.
+        if !rbuf.is_empty() {
+            process_tls_reads(&mut self.connection, rbuf, &mut self.read_buf)?;
+            return Ok(0);
+        }
         if rbuf.buf_len() == rbuf.buf_capacity() {
             rbuf.reserve(4096);
         }
@@ -156,7 +178,17 @@ where
                 break;
             }
         }
-        Ok(())
+        // Processing the peer's final flight can complete our handshake while
+        // queuing a final flight that the peer still needs to complete theirs.
+        self.flush_tls_writes().await
+    }
+}
+
+impl<S: Splittable, C> TlsStream<S, C> {
+    /// Splits the transport and TLS state without discarding buffered data.
+    pub fn into_split(self) -> TlsStreamHalves<S, C> {
+        let (reader, writer) = self.io.split();
+        split_tls_stream_with_buffers(reader, writer, self.connection, self.read_buf, self.write_buf)
     }
 }
 
@@ -175,10 +207,10 @@ where
             };
 
             // Drive TLS state machine
-            if self.connection.wants_write() {
-                if let Err(e) = self.flush_tls_writes().await {
-                    return BufResult(Err(e), buf);
-                }
+            if self.connection.wants_write()
+                && let Err(e) = self.flush_tls_writes().await
+            {
+                return BufResult(Err(e), buf);
             }
 
             if self.connection.wants_read() {

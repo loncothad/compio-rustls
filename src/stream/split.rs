@@ -72,16 +72,28 @@ where
                 };
 
                 // Handshake/Side-effects might generate writes
-                if state.connection.wants_write() {
-                    if let Err(e) = state.flush().await {
-                        return BufResult(Err(e), buf);
-                    }
+                if state.connection.wants_write()
+                    && let Err(e) = state.flush().await
+                {
+                    return BufResult(Err(e), buf);
                 }
 
                 // If we're done handshaking/writing and rustls doesn't want to read anymore
                 // (e.g. gracefully closed), return clean EOF without blocking on os_reader.
                 if !state.connection.wants_read() {
                     return BufResult(Ok(0), buf);
+                }
+
+                // Rustls may consume only a prefix of a transport read. Feed
+                // retained ciphertext while locked, before awaiting OS input.
+                if let Some(b) = self.read_buf.take() {
+                    if !b.is_empty() {
+                        if let Err(e) = process_tls_reads(&mut state.connection, b, &mut self.read_buf) {
+                            return BufResult(Err(e), buf);
+                        }
+                        continue;
+                    }
+                    self.read_buf = Some(b);
                 }
             }
 
@@ -166,23 +178,7 @@ pub fn split_tls_stream<SR, SW, C>(
     os_writer: SW,
     connection: C,
 ) -> (TlsReadHalf<SR, SW, C>, TlsWriteHalf<SW, C>) {
-    let shared_state = Rc::new(Mutex::new(SharedTlsState {
-        os_writer,
-        connection,
-        write_buf: Some(BytesMut::with_capacity(4096)),
-    }));
-
-    let read_half = TlsReadHalf {
-        os_reader,
-        shared: Rc::clone(&shared_state),
-        read_buf: Some(BytesMut::with_capacity(4096)),
-    };
-
-    let write_half = TlsWriteHalf {
-        shared: shared_state
-    };
-
-    (read_half, write_half)
+    split_tls_stream_with_capacity(os_reader, os_writer, connection, 4096)
 }
 
 /// Constructs independent Read and Write halves from split OS streams and a TLS
@@ -193,16 +189,32 @@ pub fn split_tls_stream_with_capacity<SR, SW, C>(
     connection: C,
     capacity: usize,
 ) -> (TlsReadHalf<SR, SW, C>, TlsWriteHalf<SW, C>) {
+    split_tls_stream_with_buffers(
+        os_reader,
+        os_writer,
+        connection,
+        Some(BytesMut::with_capacity(capacity)),
+        Some(BytesMut::with_capacity(capacity)),
+    )
+}
+
+pub(crate) fn split_tls_stream_with_buffers<SR, SW, C>(
+    os_reader: SR,
+    os_writer: SW,
+    connection: C,
+    read_buf: Option<BytesMut>,
+    write_buf: Option<BytesMut>,
+) -> (TlsReadHalf<SR, SW, C>, TlsWriteHalf<SW, C>) {
     let shared_state = Rc::new(Mutex::new(SharedTlsState {
         os_writer,
         connection,
-        write_buf: Some(BytesMut::with_capacity(capacity)),
+        write_buf,
     }));
 
     let read_half = TlsReadHalf {
         os_reader,
         shared: Rc::clone(&shared_state),
-        read_buf: Some(BytesMut::with_capacity(capacity)),
+        read_buf,
     };
 
     let write_half = TlsWriteHalf {

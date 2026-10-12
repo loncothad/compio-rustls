@@ -130,11 +130,11 @@ where
     let slice = unsafe { std::slice::from_raw_parts_mut(buf.buf_mut_ptr().cast::<u8>().add(init_len), cap - init_len) };
 
     match connection.reader().read(slice) {
-        | Ok(n) if n > 0 => unsafe {
+        | Ok(n) => unsafe {
             buf.advance_to(init_len + n);
             Ok(BufResult(Ok(n), buf))
         },
         | Err(e) if e.kind() != io::ErrorKind::WouldBlock => Ok(BufResult(Err(e), buf)),
-        | _ => Err(buf), // Need more data from the socket
+        | Err(_) => Err(buf), // Need more data from the socket
     }
 }
