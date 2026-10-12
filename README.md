@@ -7,6 +7,11 @@ Rough example of how to use this crate can be found at the
 [tests/](tests/) directory. If you are familiar `tokio-rustls`, then it
 should be familiar to you.
 
+TLS ciphertext buffers use [`bytes-rc`](https://crates.io/crates/bytes-rc)
+with non-atomic reference counts. Keep each TLS stream and its I/O operations
+on one Compio runtime thread. The stream types do not implement `Send` or
+`Sync`.
+
 ## License
 
 This project is licensed under either of

@@ -3,7 +3,7 @@ use std::io::{
     Write,
 };
 
-use compio_buf::bytes::BytesMut;
+use bytes_rc::BytesMut;
 
 pub struct BytesMutWriter<'a>(pub &'a mut BytesMut);
 

@@ -6,11 +6,11 @@ use std::{
     ops::DerefMut,
 };
 
+use bytes_rc::BytesMut;
 use compio_buf::{
     BufResult,
-    IoBuf as _,
+    IntoInner as _,
     IoBufMut,
-    bytes::BytesMut,
 };
 use compio_io::AsyncWrite;
 use rustls::{
@@ -18,7 +18,10 @@ use rustls::{
     SideData,
 };
 
-use crate::util::bytes_bridge::BytesMutWriter;
+use crate::util::{
+    bytes_bridge::BytesMutWriter,
+    io_buffer::IoBuffer,
+};
 
 /// Pull generated ciphertext from `rustls` and push it to the underlying OS
 /// socket.
@@ -43,8 +46,8 @@ where
     }
 
     // Flush the buffer to the OS
-    while wbuf.buf_len() > 0 {
-        let BufResult(res, mut b) = io.write(wbuf).await;
+    while !wbuf.is_empty() {
+        let BufResult(res, mut b) = io.write(IoBuffer(wbuf)).await.into_inner();
 
         let n = match res {
             | Ok(n) => n,
@@ -59,7 +62,7 @@ where
             return Err(io::Error::new(io::ErrorKind::WriteZero, "failed to write tls data"));
         }
 
-        let len = b.buf_len();
+        let len = b.len();
         if n == len {
             b.clear();
             wbuf = b;
@@ -86,12 +89,12 @@ where
     C: DerefMut<Target = ConnectionCommon<SD>>,
     SD: SideData,
 {
-    let mut cursor = io::Cursor::new(b.as_init());
+    let mut cursor = io::Cursor::new(b.as_ref());
     let read_res = connection.read_tls(&mut cursor);
 
     // Check how many bytes rustls actually consumed
     let consumed = cursor.position() as usize;
-    let len = b.buf_len();
+    let len = b.len();
 
     if consumed == len {
         b.clear();

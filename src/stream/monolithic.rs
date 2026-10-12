@@ -1,9 +1,9 @@
+use bytes_rc::BytesMut;
 use compio_buf::{
     BufResult,
     IntoInner as _,
     IoBuf,
     IoBufMut,
-    bytes::BytesMut,
 };
 use compio_io::{
     AsyncRead,
@@ -29,6 +29,7 @@ use crate::{
             read_plaintext,
         },
     },
+    util::io_buffer::IoBuffer,
 };
 
 pub struct TlsStream<S, C> {
@@ -122,8 +123,9 @@ where
         (&mut self.io, &mut self.connection)
     }
 
-    /// Extracts the transport and Rustls connection, discarding local TLS buffers.
-    /// Use [`Self::into_split`] to split a stream without losing buffered data.
+    /// Extracts the transport and Rustls connection, discarding local TLS
+    /// buffers. Use [`Self::into_split`] to split a stream without losing
+    /// buffered data.
     pub fn into_inner(self) -> (S, C) {
         (self.io, self.connection)
     }
@@ -140,13 +142,13 @@ where
             process_tls_reads(&mut self.connection, rbuf, &mut self.read_buf)?;
             return Ok(0);
         }
-        if rbuf.buf_len() == rbuf.buf_capacity() {
+        if rbuf.len() == rbuf.capacity() {
             rbuf.reserve(4096);
         }
 
-        let init_len = rbuf.buf_len();
-        let BufResult(res, slice) = self.io.read(rbuf.slice(init_len ..)).await;
-        let mut b = slice.into_inner();
+        let init_len = rbuf.len();
+        let BufResult(res, slice) = self.io.read(IoBuffer(rbuf).slice(init_len ..)).await;
+        let mut b = slice.into_inner().into_inner();
 
         let n = match res {
             | Ok(0) => {
