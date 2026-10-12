@@ -1,11 +1,30 @@
-use std::io::{self, Cursor, Write};
+use std::io::{
+    self,
+    Cursor,
+    Write,
+};
 
-use compio_buf::{BufResult, IoBuf, IoBufMut};
-use compio_io::{AsyncRead, AsyncReadExt, AsyncWrite};
+use compio_buf::{
+    BufResult,
+    IoBuf,
+    IoBufMut,
+};
+use compio_io::{
+    AsyncRead,
+    AsyncReadExt,
+    AsyncWrite,
+};
 use futures_util::FutureExt;
-use rustls::{ClientConnection, ServerConnection, pki_types::ServerName};
+use rustls::{
+    ClientConnection,
+    ServerConnection,
+    pki_types::ServerName,
+};
 
-use super::{TlsStream, split_tls_stream_with_capacity};
+use super::{
+    TlsStream,
+    split_tls_stream_with_capacity,
+};
 
 #[path = "../../tests/common/rustls.rs"]
 mod configs;
@@ -24,7 +43,8 @@ impl AsyncRead for Response {
             ciphertext.len() <= buf.buf_capacity(),
             "response must fit in one transport read"
         );
-        // SAFETY: the destination has sufficient capacity and the source is initialized.
+        // SAFETY: the destination has sufficient capacity and the source is
+        // initialized.
         unsafe {
             std::ptr::copy_nonoverlapping(ciphertext.as_ptr(), buf.buf_mut_ptr().cast(), ciphertext.len());
             buf.set_len(ciphertext.len());
@@ -41,6 +61,7 @@ impl AsyncWrite for Response {
     async fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+
     async fn shutdown(&mut self) -> io::Result<()> {
         Ok(())
     }
@@ -51,7 +72,9 @@ impl compio_io::util::Splittable for Response {
     type WriteHalf = Self;
 
     fn split(self) -> (Self, Self) {
-        (self, Self { ciphertext: None })
+        (self, Self {
+            ciphertext: None
+        })
     }
 }
 
@@ -78,8 +101,9 @@ fn connection_pair() -> (ClientConnection, ServerConnection) {
 
 fn response(close: bool) -> (ClientConnection, Response, Vec<u8>) {
     let (client, mut server) = connection_pair();
-    // More than Rustls's ciphertext intake limit, spread across multiple records.
-    let plaintext: Vec<u8> = (0..100_000).map(|i| (i % 251) as u8).collect();
+    // More than Rustls's ciphertext intake limit, spread across multiple
+    // records.
+    let plaintext: Vec<u8> = (0 .. 100_000).map(|i| (i % 251) as u8).collect();
     server.set_buffer_limit(None);
     server.writer().write_all(&plaintext).unwrap();
     if close {
@@ -113,8 +137,14 @@ fn monolithic_coalesced_response() {
 #[test]
 fn split_coalesced_response() {
     let (client, transport, expected) = response(false);
-    let (mut reader, _writer) =
-        split_tls_stream_with_capacity(transport, Response { ciphertext: None }, client, 128 * 1024);
+    let (mut reader, _writer) = split_tls_stream_with_capacity(
+        transport,
+        Response {
+            ciphertext: None
+        },
+        client,
+        128 * 1024,
+    );
     let result = reader
         .read_exact(Vec::with_capacity(expected.len()))
         .now_or_never()
@@ -143,8 +173,14 @@ fn coalesced_close_notify() {
 #[test]
 fn split_coalesced_close_notify() {
     let (client, transport, expected) = response(true);
-    let (mut reader, _writer) =
-        split_tls_stream_with_capacity(transport, Response { ciphertext: None }, client, 128 * 1024);
+    let (mut reader, _writer) = split_tls_stream_with_capacity(
+        transport,
+        Response {
+            ciphertext: None
+        },
+        client,
+        128 * 1024,
+    );
     let (_, actual) = reader
         .read_exact(Vec::with_capacity(expected.len()))
         .now_or_never()
@@ -195,14 +231,14 @@ fn splitting_preserves_buffered_ciphertext() {
         .now_or_never()
         .expect("first byte must be available")
         .unwrap();
-    assert_eq!(first, expected[..1]);
+    assert_eq!(first, expected[.. 1]);
     let (mut reader, _writer) = stream.into_split();
     let (_, rest) = reader
         .read_exact(Vec::with_capacity(expected.len() - 1))
         .now_or_never()
         .expect("splitting must retain ciphertext already read from the transport")
         .unwrap();
-    assert_eq!(rest, expected[1..]);
+    assert_eq!(rest, expected[1 ..]);
 }
 
 struct BlockedTransport;
@@ -217,9 +253,11 @@ impl AsyncWrite for BlockedTransport {
     async fn write<B: IoBuf>(&mut self, _buf: B) -> BufResult<usize, B> {
         std::future::pending().await
     }
+
     async fn flush(&mut self) -> io::Result<()> {
         std::future::pending().await
     }
+
     async fn shutdown(&mut self) -> io::Result<()> {
         std::future::pending().await
     }

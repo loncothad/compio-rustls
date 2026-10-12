@@ -1,37 +1,53 @@
 use std::{
     cell::RefCell,
-    io::{self, Cursor, Read},
+    io::{
+        self,
+        Cursor,
+        Read,
+    },
     rc::Rc,
     task::Waker,
 };
 
-use compio_buf::{BufResult, IoBuf};
-use compio_io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use compio_buf::{
+    BufResult,
+    IoBuf,
+};
+use compio_io::{
+    AsyncRead,
+    AsyncReadExt,
+    AsyncWrite,
+    AsyncWriteExt,
+};
 use futures_util::FutureExt;
 
-use super::{Response, connection_pair, response};
+use super::{
+    Response,
+    connection_pair,
+    response,
+};
 use crate::split_tls_stream_with_capacity;
 
 struct Control {
-    writes_left: Option<usize>,
-    max_write: usize,
-    next_error: Option<io::ErrorKind>,
-    allow_flush: bool,
+    writes_left:    Option<usize>,
+    max_write:      usize,
+    next_error:     Option<io::ErrorKind>,
+    allow_flush:    bool,
     allow_shutdown: bool,
-    ciphertext: Vec<u8>,
-    waker: Option<Waker>,
+    ciphertext:     Vec<u8>,
+    waker:          Option<Waker>,
 }
 
 impl Default for Control {
     fn default() -> Self {
         Self {
-            writes_left: None,
-            max_write: usize::MAX,
-            next_error: None,
-            allow_flush: true,
+            writes_left:    None,
+            max_write:      usize::MAX,
+            next_error:     None,
+            allow_flush:    true,
             allow_shutdown: true,
-            ciphertext: Vec::new(),
-            waker: None,
+            ciphertext:     Vec::new(),
+            waker:          None,
         }
     }
 }
@@ -57,7 +73,7 @@ impl AsyncWrite for ControlledWriter {
             return BufResult(Err(io::Error::from(kind)), buf);
         }
         let count = control.max_write.min(buf.buf_len());
-        control.ciphertext.extend_from_slice(&buf.as_init()[..count]);
+        control.ciphertext.extend_from_slice(&buf.as_init()[.. count]);
         BufResult(Ok(count), buf)
     }
 
@@ -225,7 +241,9 @@ fn errors_and_partial_writes_preserve_record_order() {
         ..Control::default()
     }));
     let (_reader, mut writer) = split_tls_stream_with_capacity(
-        Response { ciphertext: None },
+        Response {
+            ciphertext: None
+        },
         ControlledWriter(Rc::clone(&control)),
         client,
         4096,
@@ -264,8 +282,14 @@ fn zero_write_keeps_ciphertext_for_flush() {
     }));
     // Borrowed transports must remain supported without a new 'static bound.
     let mut transport = ControlledWriter(Rc::clone(&control));
-    let (_reader, mut writer) =
-        split_tls_stream_with_capacity(Response { ciphertext: None }, &mut transport, client, 4096);
+    let (_reader, mut writer) = split_tls_stream_with_capacity(
+        Response {
+            ciphertext: None
+        },
+        &mut transport,
+        client,
+        4096,
+    );
     let BufResult(result, _) = writer
         .write(b"request".to_vec())
         .now_or_never()
@@ -291,7 +315,9 @@ fn cancelled_transport_flush_keeps_write_half_usable() {
         ..Control::default()
     }));
     let (_reader, mut writer) = split_tls_stream_with_capacity(
-        Response { ciphertext: None },
+        Response {
+            ciphertext: None
+        },
         ControlledWriter(Rc::clone(&control)),
         client,
         4096,
@@ -332,7 +358,9 @@ fn interrupted_transport_write_does_not_duplicate_plaintext() {
         ..Control::default()
     }));
     let (_reader, mut writer) = split_tls_stream_with_capacity(
-        Response { ciphertext: None },
+        Response {
+            ciphertext: None
+        },
         ControlledWriter(Rc::clone(&control)),
         client,
         4096,
@@ -358,7 +386,11 @@ fn interrupted_transport_write_does_not_duplicate_plaintext() {
 
 #[test]
 fn flush_sends_handshake_output_generated_by_reader() {
-    use rustls::{ClientConnection, ServerConnection, pki_types::ServerName};
+    use rustls::{
+        ClientConnection,
+        ServerConnection,
+        pki_types::ServerName,
+    };
     let (server_config, client_config) = super::configs::create_configs();
     let mut client = ClientConnection::new(client_config, ServerName::try_from("localhost").unwrap()).unwrap();
     let mut server = ServerConnection::new(server_config).unwrap();
