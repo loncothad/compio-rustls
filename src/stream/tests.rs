@@ -55,7 +55,7 @@ impl compio_io::util::Splittable for Response {
     }
 }
 
-fn response(close: bool) -> (ClientConnection, Response, Vec<u8>) {
+fn connection_pair() -> (ClientConnection, ServerConnection) {
     let (server_config, client_config) = configs::create_configs();
     let mut client = ClientConnection::new(client_config, ServerName::try_from("localhost").unwrap()).unwrap();
     let mut server = ServerConnection::new(server_config).unwrap();
@@ -73,6 +73,11 @@ fn response(close: bool) -> (ClientConnection, Response, Vec<u8>) {
             client.process_new_packets().unwrap();
         }
     }
+    (client, server)
+}
+
+fn response(close: bool) -> (ClientConnection, Response, Vec<u8>) {
+    let (client, mut server) = connection_pair();
     // More than Rustls's ciphertext intake limit, spread across multiple records.
     let plaintext: Vec<u8> = (0..100_000).map(|i| (i % 251) as u8).collect();
     server.set_buffer_limit(None);
@@ -255,3 +260,5 @@ fn split_clean_eof_does_not_wait_for_writes() {
         .expect("clean EOF must not wait for a blocked outbound write");
     assert_eq!(result.unwrap(), 0);
 }
+
+mod split_writes;
