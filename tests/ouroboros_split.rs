@@ -33,9 +33,7 @@ async fn run() -> io::Result<()> {
         let tls_stream = acceptor.accept(stream).await.unwrap();
 
         // Split the stream
-        let (tcp_stream, rustls_conn) = tls_stream.into_inner();
-        let (tcp_rx, tcp_tx) = tcp_stream.into_split();
-        let (mut tls_rx, mut tls_tx) = compio_rustls::split_tls_stream(tcp_rx, tcp_tx, rustls_conn);
+        let (mut tls_rx, mut tls_tx) = tls_stream.into_split();
 
         // Spawn a parallel write task
         let write_task = compio::runtime::spawn(async move {
@@ -59,9 +57,7 @@ async fn run() -> io::Result<()> {
         let tls_stream = connector.connect(domain, stream).await.unwrap();
 
         // Split the stream
-        let (tcp_stream, rustls_conn) = tls_stream.into_inner();
-        let (tcp_rx, tcp_tx) = tcp_stream.into_split();
-        let (mut tls_rx, mut tls_tx) = compio_rustls::split_tls_stream(tcp_rx, tcp_tx, rustls_conn);
+        let (mut tls_rx, mut tls_tx) = tls_stream.into_split();
 
         // Spawn a parallel write task
         let write_task = compio::runtime::spawn(async move {

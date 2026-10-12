@@ -4,3 +4,6 @@ mod util;
 
 pub use monolithic::*;
 pub use split::*;
+
+#[cfg(test)]
+mod tests;
