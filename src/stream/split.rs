@@ -8,15 +8,15 @@ use std::{
     rc::Rc,
 };
 
+use bytes_rc::{
+    Bytes,
+    BytesMut,
+};
 use compio_buf::{
     BufResult,
     IntoInner as _,
     IoBuf,
     IoBufMut,
-    bytes::{
-        Bytes,
-        BytesMut,
-    },
 };
 use compio_io::{
     AsyncRead,
@@ -33,7 +33,10 @@ use crate::{
         process_tls_reads,
         read_plaintext,
     },
-    util::bytes_bridge::BytesMutWriter,
+    util::{
+        bytes_bridge::BytesMutWriter,
+        io_buffer::IoBuffer,
+    },
 };
 
 pub struct SharedTlsState<SW, C> {
@@ -80,14 +83,15 @@ impl<SW: AsyncWrite> TlsWriter<SW> {
                 self.pending = std::mem::take(&mut self.write_buf).freeze();
             }
 
-            // Keep the full batch in shared writer state. Only a cheap immutable
-            // slice is owned by the OS operation, so errors cannot lose the tail.
+            // Keep the full batch in shared writer state. Only a cheap
+            // immutable slice is owned by the OS operation, so
+            // errors cannot lose the tail.
             let remaining = self.pending.len() - self.written;
             // Cancellation leaves this set. The next writer must not replay a
             // batch whose OS write might already have sent an unknown prefix.
             self.write_in_flight = true;
             let ciphertext = Bytes::slice(&self.pending, self.written ..);
-            let BufResult(result, returned) = self.os_writer.write(ciphertext).await;
+            let BufResult(result, returned) = self.os_writer.write(IoBuffer(ciphertext)).await.into_inner();
             self.write_in_flight = false;
             drop(returned);
             let count = match result {
@@ -100,7 +104,10 @@ impl<SW: AsyncWrite> TlsWriter<SW> {
             }
             if count > remaining {
                 self.write_in_flight = true;
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid TLS transport write count"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid TLS transport write count",
+                ));
             }
             self.written += count;
             if self.written == self.pending.len() {
@@ -187,13 +194,13 @@ where
 
             // Wait on OS Reader for ciphertext
             let mut rbuf = self.read_buf.take().unwrap_or_else(|| BytesMut::with_capacity(4096));
-            if rbuf.buf_len() == rbuf.buf_capacity() {
+            if rbuf.len() == rbuf.capacity() {
                 rbuf.reserve(4096);
             }
 
-            let init_len = rbuf.buf_len();
-            let BufResult(res, slice) = self.os_reader.read(rbuf.slice(init_len ..)).await;
-            let mut b = slice.into_inner();
+            let init_len = rbuf.len();
+            let BufResult(res, slice) = self.os_reader.read(IoBuffer(rbuf).slice(init_len ..)).await;
+            let mut b = slice.into_inner().into_inner();
 
             match res {
                 | Ok(0) => {
@@ -313,7 +320,7 @@ pub(crate) fn split_tls_stream_with_buffers<SR, SW, C>(
 ) -> (TlsReadHalf<SR, SW, C>, TlsWriteHalf<SW, C>) {
     let shared_state = Rc::new(SharedTlsState {
         connection: RefCell::new(connection),
-        writer: Mutex::new(TlsWriter {
+        writer:     Mutex::new(TlsWriter {
             os_writer,
             write_buf: write_buf.unwrap_or_else(|| BytesMut::with_capacity(4096)),
             pending: Bytes::new(),
