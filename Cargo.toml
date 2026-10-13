@@ -19,7 +19,7 @@ rustls-pki-types = "1"
 
 [dependencies]
 # The I/O adapter relies on the audited chunk_mut behavior of this release.
-bytes-rc       = "=2.0.0"
+bytes-rc       = "2"
 compio-io      = "0.10"
 compio-buf     = "0.8"
 rustls         = "0.23"
