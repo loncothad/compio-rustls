@@ -12,13 +12,17 @@ with non-atomic reference counts. Keep each TLS stream and its I/O operations
 on one Compio runtime thread. The stream types do not implement `Send` or
 `Sync`.
 
-After splitting a stream, both halves provide synchronous `with_connection`
-and `with_connection_mut` callbacks for access to the shared Rustls connection.
-For example, `reader.with_connection(|c| c.alpn_protocol().map(<[u8]>::to_vec))`
+After splitting a stream, call `reader.session()` to obtain a `TlsSession`
+handle before starting a read. The handle clones an `Rc` to the same shared
+state; it does not copy the TLS connection or buffers. Use its synchronous
+`with_connection` and `with_connection_mut` callbacks even while the read half
+is borrowed by a pending read. The write half provides these callbacks directly.
+For example, `session.with_connection(|c| c.alpn_protocol().map(<[u8]>::to_vec))`
 returns the negotiated ALPN as an owned value. Connection references cannot
 leave a callback or cross an `.await`. Do not re-enter connection access or
-poll I/O on either half from a callback. Flush the write half after a callback
-that queues TLS output.
+poll I/O from a callback. Flush the write half after a callback that queues TLS
+output. Session handles retain the connection and transport writer until the
+last handle and both stream halves are dropped.
 
 ## License
 
