@@ -310,31 +310,33 @@ fn split_connection_access_preserves_metadata_and_shared_updates() {
         },
         client,
     );
-    let (mut reader, mut writer) = stream.into_split();
+    let (reader, mut writer) = stream.into_split();
+    let mut session = reader.session();
     assert_eq!(
-        reader.with_connection(|c| c.peer_certificates().unwrap().to_vec()),
+        session.with_connection(|c| c.peer_certificates().unwrap().to_vec()),
         expected_certificates
     );
     assert_eq!(
         writer.with_connection(|c| c.export_keying_material([0u8; 32], b"test", None).unwrap()),
         expected_export
     );
-    assert!(!reader.with_connection(|c| c.is_handshaking()));
+    assert!(!session.with_connection(|c| c.is_handshaking()));
     assert!(!writer.with_connection(|c| c.is_handshaking()));
 
-    reader.with_connection_mut(|c| c.send_close_notify());
+    session.with_connection_mut(|c| c.send_close_notify());
     assert!(writer.with_connection(|c| c.wants_write()));
     writer.flush().now_or_never().unwrap().unwrap();
-    assert!(!reader.with_connection(|c| c.wants_write()));
+    assert!(!session.with_connection(|c| c.wants_write()));
     writer.with_connection_mut(|c| c.set_buffer_limit(Some(0)));
-    assert_eq!(reader.with_connection_mut(|c| c.writer().write(b"data").unwrap()), 0);
+    assert_eq!(session.with_connection_mut(|c| c.writer().write(b"data").unwrap()), 0);
 }
 
 #[test]
 fn split_connection_borrows_are_released_after_callback_panics() {
-    let (mut reader, writer) = super::split_tls_stream((), (), 0u8);
+    let (reader, writer) = super::split_tls_stream((), (), 0u8);
+    let mut session = reader.session();
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        reader.with_connection_mut(|connection| {
+        session.with_connection_mut(|connection| {
             *connection = 7;
             panic!("callback failed");
         });
@@ -349,10 +351,86 @@ fn split_connection_access_survives_dropping_other_half() {
     drop(reader);
     writer.with_connection_mut(|connection| *connection += 1);
     assert_eq!(writer.with_connection(|connection| *connection), 2);
-    let (mut reader, writer) = super::split_tls_stream((), (), 1u8);
+    let (reader, writer) = super::split_tls_stream((), (), 1u8);
+    let mut session = reader.session();
     drop(writer);
-    reader.with_connection_mut(|connection| *connection += 1);
-    assert_eq!(reader.with_connection(|connection| *connection), 2);
+    session.with_connection_mut(|connection| *connection += 1);
+    assert_eq!(session.with_connection(|connection| *connection), 2);
+}
+
+#[test]
+fn session_access_during_pending_read() {
+    let (client, _) = connection_pair();
+    let (mut reader, mut writer) = super::split_tls_stream(
+        BlockedTransport,
+        Response {
+            ciphertext: None
+        },
+        client,
+    );
+    let mut session = reader.session();
+    let mut reading = std::pin::pin!(reader.read(Vec::with_capacity(1)));
+    assert!(
+        reading.as_mut().now_or_never().is_none(),
+        "transport read must be pending"
+    );
+    assert!(!session.with_connection(|connection| connection.is_handshaking()));
+    session.with_connection_mut(|connection| connection.set_buffer_limit(Some(0)));
+    let BufResult(result, _) = writer.write(b"data".to_vec()).now_or_never().unwrap();
+    assert_eq!(result.unwrap(), 0, "writer must see the session's connection update");
+    assert!(!writer.with_connection(|connection| connection.is_handshaking()));
+    writer.with_connection_mut(|connection| connection.set_buffer_limit(None));
+    let BufResult(result, _) = writer.write(b"data".to_vec()).now_or_never().unwrap();
+    assert_eq!(result.unwrap(), 4, "write-half access and I/O must remain available");
+    assert!(
+        reading.as_mut().now_or_never().is_none(),
+        "session access must not consume input"
+    );
+}
+
+#[test]
+fn session_clones_share_state_and_retain_writer_without_clone_bounds() {
+    use std::rc::Rc;
+    struct NotClone(Rc<()>);
+    let writer_lifetime = Rc::new(());
+    let connection_lifetime = Rc::new(());
+    let (reader, writer) = super::split_tls_stream(
+        (),
+        NotClone(Rc::clone(&writer_lifetime)),
+        NotClone(Rc::clone(&connection_lifetime)),
+    );
+    let session = reader.session();
+    let second = reader.session();
+    let clone = session.clone();
+    let connection_address = writer.with_connection(|connection| connection as *const NotClone);
+    for handle in [&session, &second, &clone] {
+        assert_eq!(
+            handle.with_connection(|connection| connection as *const NotClone),
+            connection_address
+        );
+        assert!(handle.with_connection(|connection| Rc::ptr_eq(&connection.0, &connection_lifetime)));
+    }
+    drop(reader);
+    drop(writer);
+    assert_eq!(
+        Rc::strong_count(&writer_lifetime),
+        2,
+        "session must retain the transport writer"
+    );
+    assert_eq!(
+        Rc::strong_count(&connection_lifetime),
+        2,
+        "session must retain the connection"
+    );
+    drop(session);
+    drop(second);
+    assert_eq!(
+        clone.with_connection(|connection| connection as *const NotClone),
+        connection_address
+    );
+    drop(clone);
+    assert_eq!(Rc::strong_count(&writer_lifetime), 1);
+    assert_eq!(Rc::strong_count(&connection_lifetime), 1);
 }
 
 mod split_writes;
