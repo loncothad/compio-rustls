@@ -299,4 +299,60 @@ fn split_clean_eof_does_not_wait_for_writes() {
     assert_eq!(result.unwrap(), 0);
 }
 
+#[test]
+fn split_connection_access_preserves_metadata_and_shared_updates() {
+    let (client, _) = connection_pair();
+    let expected_certificates = client.peer_certificates().unwrap().to_vec();
+    let expected_export = client.export_keying_material([0u8; 32], b"test", None).unwrap();
+    let stream = TlsStream::new(
+        Response {
+            ciphertext: None
+        },
+        client,
+    );
+    let (mut reader, mut writer) = stream.into_split();
+    assert_eq!(
+        reader.with_connection(|c| c.peer_certificates().unwrap().to_vec()),
+        expected_certificates
+    );
+    assert_eq!(
+        writer.with_connection(|c| c.export_keying_material([0u8; 32], b"test", None).unwrap()),
+        expected_export
+    );
+    assert!(!reader.with_connection(|c| c.is_handshaking()));
+    assert!(!writer.with_connection(|c| c.is_handshaking()));
+
+    reader.with_connection_mut(|c| c.send_close_notify());
+    assert!(writer.with_connection(|c| c.wants_write()));
+    writer.flush().now_or_never().unwrap().unwrap();
+    assert!(!reader.with_connection(|c| c.wants_write()));
+    writer.with_connection_mut(|c| c.set_buffer_limit(Some(0)));
+    assert_eq!(reader.with_connection_mut(|c| c.writer().write(b"data").unwrap()), 0);
+}
+
+#[test]
+fn split_connection_borrows_are_released_after_callback_panics() {
+    let (mut reader, writer) = super::split_tls_stream((), (), 0u8);
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reader.with_connection_mut(|connection| {
+            *connection = 7;
+            panic!("callback failed");
+        });
+    }));
+    assert!(outcome.is_err());
+    assert_eq!(writer.with_connection(|connection| *connection), 7);
+}
+
+#[test]
+fn split_connection_access_survives_dropping_other_half() {
+    let (reader, mut writer) = super::split_tls_stream((), (), 1u8);
+    drop(reader);
+    writer.with_connection_mut(|connection| *connection += 1);
+    assert_eq!(writer.with_connection(|connection| *connection), 2);
+    let (mut reader, writer) = super::split_tls_stream((), (), 1u8);
+    drop(writer);
+    reader.with_connection_mut(|connection| *connection += 1);
+    assert_eq!(reader.with_connection(|connection| *connection), 2);
+}
+
 mod split_writes;

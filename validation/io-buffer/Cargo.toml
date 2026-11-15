@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 # Check the same released buffer versions as the main package.
 [dev-dependencies]
 bytes-rc = "=2.0.0"
-compio-buf = "=0.8.2"
-bytes = "=1.11.1"
+compio-buf = "=0.8.3"
+bytes = "=1.12.1"
 
 [workspace]

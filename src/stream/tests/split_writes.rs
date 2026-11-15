@@ -126,6 +126,8 @@ fn reader_progresses_during_blocked_write() {
         writing.as_mut().now_or_never().is_none(),
         "transport write must be blocked"
     );
+    assert!(!reader.with_connection(|connection| connection.is_handshaking()));
+    reader.with_connection_mut(|connection| connection.set_buffer_limit(None));
     let (_, actual) = reader
         .read_exact(Vec::with_capacity(expected.len()))
         .now_or_never()

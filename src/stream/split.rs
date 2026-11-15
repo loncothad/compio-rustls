@@ -137,6 +137,47 @@ pub struct TlsReadHalf<SR, SW, C> {
     read_buf:  Option<BytesMut>,
 }
 
+impl<SR, SW, C> TlsReadHalf<SR, SW, C> {
+    /// Inspects the shared Rustls connection in a synchronous callback.
+    ///
+    /// Return owned values when inspecting ALPN, peer certificates, or other
+    /// connection metadata. The connection borrow cannot leave the callback.
+    ///
+    /// ```compile_fail
+    /// use compio_rustls::TlsReadHalf;
+    /// fn escape(half: &TlsReadHalf<(), (), rustls::ClientConnection>) {
+    ///     let connection = half.with_connection(|connection| connection);
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    /// Panics if called from a mutable connection callback on the other half.
+    pub fn with_connection<R>(&self, f: impl FnOnce(&C) -> R) -> R {
+        f(&self.shared.connection.borrow())
+    }
+
+    /// Updates the shared Rustls connection in a synchronous callback.
+    ///
+    /// Do not drive I/O or re-enter connection access on either half from the
+    /// callback. Flush the write half afterwards if the update queues TLS
+    /// output. The mutable borrow cannot leave the callback or cross an await.
+    ///
+    /// ```compile_fail
+    /// use compio_rustls::TlsReadHalf;
+    /// fn escape(half: &mut TlsReadHalf<(), (), rustls::ClientConnection>) {
+    ///     let future = half.with_connection_mut(|connection| async move {
+    ///         connection.send_close_notify();
+    ///     });
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    /// Panics if called from a connection callback on the other half.
+    pub fn with_connection_mut<R>(&mut self, f: impl FnOnce(&mut C) -> R) -> R {
+        f(&mut self.shared.connection.borrow_mut())
+    }
+}
+
 impl<SR, SW, C, SD> AsyncRead for TlsReadHalf<SR, SW, C>
 where
     SR: AsyncRead,
@@ -233,6 +274,30 @@ where
 /// not invalidate the write half.
 pub struct TlsWriteHalf<SW, C> {
     shared: Rc<SharedTlsState<SW, C>>,
+}
+
+impl<SW, C> TlsWriteHalf<SW, C> {
+    /// Inspects the shared Rustls connection in a synchronous callback.
+    ///
+    /// See [`TlsReadHalf::with_connection`] for usage and borrow restrictions.
+    ///
+    /// # Panics
+    /// Panics if called from a mutable connection callback on the other half.
+    pub fn with_connection<R>(&self, f: impl FnOnce(&C) -> R) -> R {
+        f(&self.shared.connection.borrow())
+    }
+
+    /// Updates the shared Rustls connection in a synchronous callback.
+    ///
+    /// See [`TlsReadHalf::with_connection_mut`] for usage and borrow
+    /// restrictions. Call [`AsyncWrite::flush`] afterwards if the update
+    /// queues TLS output.
+    ///
+    /// # Panics
+    /// Panics if called from a connection callback on the other half.
+    pub fn with_connection_mut<R>(&mut self, f: impl FnOnce(&mut C) -> R) -> R {
+        f(&mut self.shared.connection.borrow_mut())
+    }
 }
 
 impl<SW, C, SD> AsyncWrite for TlsWriteHalf<SW, C>

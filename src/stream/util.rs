@@ -1,8 +1,5 @@
 use std::{
-    io::{
-        self,
-        Read as _,
-    },
+    io,
     ops::DerefMut,
 };
 
@@ -20,7 +17,10 @@ use rustls::{
 
 use crate::util::{
     bytes_bridge::BytesMutWriter,
-    io_buffer::IoBuffer,
+    io_buffer::{
+        IoBuffer,
+        read_into_buf,
+    },
 };
 
 /// Pull generated ciphertext from `rustls` and push it to the underlying OS
@@ -118,26 +118,13 @@ where
 /// Attempts to read decoded plaintext from `rustls`.
 /// Returns `Ok(BufResult)` if data is yielded, or `Err(B)` if more network data
 /// is needed.
-pub(crate) fn read_plaintext<C, SD, B: IoBufMut>(connection: &mut C, mut buf: B) -> Result<BufResult<usize, B>, B>
+pub(crate) fn read_plaintext<C, SD, B: IoBufMut>(connection: &mut C, buf: B) -> Result<BufResult<usize, B>, B>
 where
     C: DerefMut<Target = ConnectionCommon<SD>>,
     SD: SideData,
 {
-    let init_len = buf.buf_len();
-    let cap = buf.buf_capacity();
-
-    if init_len == cap {
-        return Ok(BufResult(Ok(0), buf));
-    }
-
-    let slice = unsafe { std::slice::from_raw_parts_mut(buf.buf_mut_ptr().cast::<u8>().add(init_len), cap - init_len) };
-
-    match connection.reader().read(slice) {
-        | Ok(n) => unsafe {
-            buf.advance_to(init_len + n);
-            Ok(BufResult(Ok(n), buf))
-        },
-        | Err(e) if e.kind() != io::ErrorKind::WouldBlock => Ok(BufResult(Err(e), buf)),
-        | Err(_) => Err(buf), // Need more data from the socket
+    match read_into_buf(&mut connection.reader(), buf) {
+        | BufResult(Err(e), buf) if e.kind() == io::ErrorKind::WouldBlock => Err(buf),
+        | result => Ok(result),
     }
 }

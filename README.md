@@ -12,6 +12,14 @@ with non-atomic reference counts. Keep each TLS stream and its I/O operations
 on one Compio runtime thread. The stream types do not implement `Send` or
 `Sync`.
 
+After splitting a stream, both halves provide synchronous `with_connection`
+and `with_connection_mut` callbacks for access to the shared Rustls connection.
+For example, `reader.with_connection(|c| c.alpn_protocol().map(<[u8]>::to_vec))`
+returns the negotiated ALPN as an owned value. Connection references cannot
+leave a callback or cross an `.await`. Do not re-enter connection access or
+poll I/O on either half from a callback. Flush the write half after a callback
+that queues TLS output.
+
 ## License
 
 This project is licensed under either of
