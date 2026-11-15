@@ -11,6 +11,7 @@ use bytes_rc::{
     buf::BufMut as _,
 };
 use compio_buf::{
+    BufResult,
     IntoInner,
     IoBuf,
     IoBufMut,
@@ -20,6 +21,32 @@ use compio_buf::{
 };
 
 pub(crate) struct IoBuffer<B>(pub(crate) B);
+
+/// Appends a synchronous read to a completion-I/O buffer.
+pub(crate) fn read_into_buf<B: IoBufMut>(reader: &mut impl std::io::Read, mut buf: B) -> BufResult<usize, B> {
+    let initialized = buf.buf_len();
+    if initialized == buf.buf_capacity() {
+        return BufResult(Ok(0), buf);
+    }
+
+    // Read may inspect every byte of its destination. Initialize the spare
+    // capacity before creating a byte slice, preserving the existing prefix.
+    // ensure_init does not change the logical length on errors or short reads.
+    let destination = &mut buf.ensure_init()[initialized ..];
+    let available = destination.len();
+    let result = reader.read(destination).and_then(|count| {
+        if count > available {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid plaintext read count",
+            ));
+        }
+        // SAFETY: the count is bounded by the initialized destination above.
+        unsafe { buf.advance_to(initialized + count) };
+        Ok(count)
+    });
+    BufResult(result, buf)
+}
 
 impl<B> IntoInner for IoBuffer<B> {
     type Inner = B;
@@ -121,6 +148,87 @@ impl IoBufMut for IoBuffer<BytesMut> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A valid Read implementation may inspect the entire destination before
+    // writing. Under Miri this detects uninitialized input, even on EOF/errors.
+    struct InspectingReader(std::io::Result<usize>);
+
+    impl std::io::Read for InspectingReader {
+        fn read(&mut self, destination: &mut [u8]) -> std::io::Result<usize> {
+            assert!(destination.iter().all(|byte| *byte == 0));
+            destination.fill(b'x');
+            std::mem::replace(&mut self.0, Ok(0))
+        }
+    }
+
+    fn check_plaintext_append<B: IoBufMut>(buffer: B) {
+        let prefix = buffer.as_init().to_vec();
+        let BufResult(result, buffer) = read_into_buf(&mut InspectingReader(Ok(2)), buffer);
+        assert_eq!(result.unwrap(), 2);
+        assert_eq!(&buffer.as_init()[.. prefix.len()], prefix);
+        assert_eq!(&buffer.as_init()[prefix.len() ..], b"xx");
+    }
+
+    #[test]
+    fn plaintext_read_initializes_spare_capacity() {
+        check_plaintext_append(Vec::with_capacity(32));
+        check_plaintext_append(IoBuffer(BytesMut::with_capacity(32)));
+    }
+
+    #[test]
+    fn plaintext_read_preserves_initialized_prefix_and_slice_bounds() {
+        let mut buffer = Vec::with_capacity(32);
+        buffer.extend_from_slice(b"prefix");
+        check_plaintext_append(buffer);
+        let mut bytes = BytesMut::with_capacity(32);
+        bytes.extend_from_slice(b"prefix");
+        let frozen = bytes.split_to(3).freeze();
+        check_plaintext_append(IoBuffer(bytes).slice(1 .. 8));
+        assert_eq!(frozen.as_ref(), b"pre");
+    }
+
+    #[test]
+    fn plaintext_read_does_not_advance_on_eof_or_error() {
+        for outcome in [
+            Ok(0),
+            Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)),
+            Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)),
+        ] {
+            let kind = outcome.as_ref().err().map(std::io::Error::kind);
+            let mut buffer = Vec::with_capacity(32);
+            buffer.extend_from_slice(b"prefix");
+            let BufResult(result, buffer) = read_into_buf(&mut InspectingReader(outcome), buffer);
+            assert_eq!(result.as_ref().err().map(std::io::Error::kind), kind);
+            if kind.is_none() {
+                assert_eq!(result.unwrap(), 0);
+            }
+            assert_eq!(buffer, b"prefix");
+        }
+    }
+
+    #[test]
+    fn plaintext_read_rejects_invalid_count_without_advancing() {
+        let buffer = Vec::with_capacity(8);
+        let BufResult(result, buffer) = read_into_buf(&mut InspectingReader(Ok(9)), buffer);
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn plaintext_read_skips_reader_when_destination_is_full() {
+        struct MustNotRead;
+        impl std::io::Read for MustNotRead {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                panic!("a full destination must not consume plaintext");
+            }
+        }
+        let BufResult(result, buffer) = read_into_buf(&mut MustNotRead, Vec::<u8>::new());
+        assert_eq!(result.unwrap(), 0);
+        assert!(buffer.is_empty());
+        let BufResult(result, buffer) = read_into_buf(&mut MustNotRead, *b"full");
+        assert_eq!(result.unwrap(), 0);
+        assert_eq!(&buffer, b"full");
+    }
 
     #[test]
     fn empty_capacity_does_not_allocate() {

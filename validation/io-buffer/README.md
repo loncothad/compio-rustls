@@ -1,6 +1,6 @@
-This crate compiles the production I/O adapter and its tests directly. It omits
-TLS provider FFI so Miri can check buffer initialization, pointer provenance,
-shared views, and allocation reuse.
+This crate compiles the production I/O adapter, plaintext read bridge, and
+their tests directly. It omits TLS provider FFI so Miri can check buffer
+initialization, pointer provenance, shared views, and allocation reuse.
 
 From the repository root:
 
